@@ -5,6 +5,7 @@
 #include <string.h>
 #include <cstdio>
 #include <vector>
+#include <thread>
 
 class WorkerEnv : Runnable{};
 
@@ -14,18 +15,18 @@ class WorkerEnv : Runnable{};
 class Task0{
     protected: bool hasResult0 = false;
     public: bool hasResult(){ return hasResult0; }
-    public: virtual void run(WorkerEnv w) { ; /* 何もしない */}
+    public: virtual void run(WorkerEnv* w) { ; /* 何もしない */}
 };
 
 // treq の際に new して victim（候補）の req に渡す
 // 中止: 取り戻し用に requestedId いつ入手 => setTask時
 class TaskBuf{
 
-    public: Task0 task = NULL;
-    public: void setTask(Task0 task){
+    public: Task0* task = nullptr;
+    public: void setTask(Task0* task){
         this->task = task;
     }
-    public: Task0 getTask(){
+    public: Task0* getTask(){
         return task;
     }
     public: int requestedId;
@@ -39,7 +40,7 @@ class TaskBuf{
 class WorkerEnv : Runnable{
     public: int nWorkers;
     public: int myId;
-    volatile TaskBuf req = NULL;
+    public: TaskBuf *req = nullptr;
     WorkerEnv(int nWorkers, int myId){
         this->nWorkers = nWorkers;
         this->myId = myId;
@@ -47,19 +48,19 @@ class WorkerEnv : Runnable{
     // helpers
 
     void stealRunTask(WorkerEnv victim, int why){
-        TaskBuf tBuf = new TaskBuf(myId);
-        victim.tReq(this->, tBuf);
-        Task0 task = NULL;
-        while((task = tBuf.getTask()) == NULL)
+        TaskBuf *tBuf = new TaskBuf(myId);
+        victim.tReq(this, tBuf);
+        Task0 *task = nullptr;
+        while((task = tBuf->getTask()) == nullptr)
             this->refuseReq();
-        task.run(this);     //タスクを実行
+        task->run(this);     //タスクを実行
 
     }
 
     // victim候補(this)のロック獲得して，タスク要求．thiefスレッドで動く
-    void tReq(WorkerEnv thief, TaskBuf tBuf){   //syncronizeを書く
+    void tReq(WorkerEnv* thief, TaskBuf* tBuf){   //syncronizeを書く
         if(req != nullptr)
-            tBuf.setTask(new Task0());
+            tBuf->setTask(new Task0());
         else
             req = tBuf;
     }
@@ -67,20 +68,21 @@ class WorkerEnv : Runnable{
     // 要求拒否として Task0 を返す
     void refuseReq(){       //syncronizeを書く
         if(req != NULL){
-            req->setTask(new Task0());
+            Task0 *task0 = new Task0();
+            req->setTask(task0);
             req = NULL;
         }
     }
 
     // タスク要求を正式に(syncronizedしてポートから除いて)受け取る.
     // 普段 volatile の req が nullか判断する。
-    public: TaskBuf acceptReq(){    //syncronizeを書く
-        TaskBuf tb = req;
-        req = NULL;
+    public: TaskBuf* acceptReq(){    //syncronizeを書く
+        TaskBuf *tb = req;
+        req = nullptr;
         return tb;
     }
-    public: void waitResult(TaskBuf tb){
-        while(!tb.getTask().hasResult())
+    public: void waitResult(TaskBuf* tb){
+        while(!tb->getTask().hasResult())
             this->stealRunTask(ParEnv.pe[tb.requestedId],1);
     }
     
@@ -99,7 +101,7 @@ class WorkerEnv : Runnable{
 
 class ParEnv{
     //static WorkerEnv pe[];
-    static std::vector<WorkerEnv> pe;
+    static std::vector<WorkerEnv*> pe;
     static void initParallel(int nWorkers){
         pe.resize(nWorkers);
         for (int id = 0; id < nWorkers; id++)
@@ -107,14 +109,14 @@ class ParEnv{
             // 上記は環境ができてから複数スレッド開始
             // id 0 は current スレッド
         for (int id = 1; id < nWorkers; id++){
-            
+            std::thread t(pe[id]); 
         }
     }
 };
 
 // 共通にする
 class Fib0{
-    int fib0(int k){
+    static int fib0(int k){
         if(k <= 2) return 1;
         return fib0(k - 1) + fib0(k - 2);
     }
@@ -150,15 +152,15 @@ class Tfib : public Task0{
                 return this->r;
             }
 
-    public: static void main(std::string[] arg){
-            int nWorkers = atoi(arg[0]);
-            int k = atoi(arg[1]);
-            thres = atoi(arg[2]);
+    public: static void main(std::string arg[]){
+            int nWorkers = stoi(arg[0]);
+            int k = stoi(arg[1]);
+            thres = stoi(arg[2]);
             ParEnv.initParallel(nWorkers);
             int r = 0;
             long long startTime; // nanotime
             try{
-                r = fib(Parenv.pe[0],k);
+                r = fib(ParEnv.ep[],k);
             }catch (TaskBuf tb){
                 ;
             }
@@ -174,28 +176,28 @@ class Tfib : public Task0{
             // 
             // PPoPP 2009以降なら問題ない
             int r0 = 0, r1 = 0;
-            TaskBuf tb1 = NULL; //ここで面倒見る
+            TaskBuf *tb1 = nullptr; //ここで面倒見る
             try{
                 //POLL
                 if (w.req != NULL){
-                    TaskBuf tb = w.acceptReq();
+                    TaskBuf *tb = w.acceptReq();
                     if (true) throw tb; //hcallの代わり
-                    if (tb.getTask() == NULL) //
-                        tb.setTask(new Task0());
+                    if (tb->getTask() == nullptr) //
+                        tb->setTask(new Task0());
                 }
                 {{ r0 = fib(w,k - 1);}}
-            }catch (TaskBuf tb){
-                if (tb1 == NULL){
+            }catch (TaskBuf* tb){
+                if (tb1 == nullptr){
                     if (true) throw tb;  //hcallの代わり // 呼び出し元で
-                    if (tb.getTask() == NULL) // 呼び出し元で面倒みてない
-                        (tb = tb1).setTask(new Tfib(k -2));
+                    if (tb->getTask() == NULL) // 呼び出し元で面倒みてない
+                        (tb = tb1)->setTask(new Tfib(k -2));
                 }
             }
             if (tb1 == NULL)
                 {{ r1 = fib(w, k - 2);}}
             else {
                 w.waitResult(tb1);
-                {{ r1 = ((Tfib)(tb1.getTask())).getResult();}}
+                {{ r1 = ((Tfib)(tb1->getTask())).getResult();}}
             }
             return r0 + r1;
         }
@@ -229,6 +231,6 @@ class TfibL : public Task0{
 
         // fib: 別クラスにせず、ここにstaticでかく
     
-    static int fib(Worker w, )
+    static int fib(WorkerEnv w, )
 };
 
