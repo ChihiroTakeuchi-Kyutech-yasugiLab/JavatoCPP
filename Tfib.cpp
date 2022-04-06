@@ -83,7 +83,7 @@ class WorkerEnv : Runnable{
     }
     public: void waitResult(TaskBuf* tb){
         while(!tb->getTask().hasResult())
-            this->stealRunTask(ParEnv.pe[tb.requestedId],1);
+            this->stealRunTask(ParEnv::pe[tb->requestedId],1);
     }
     
     public: void run(){
@@ -94,15 +94,15 @@ class WorkerEnv : Runnable{
                 r = r * 3.0 + q, r -= (int)r){
                 int victimId = (int)(nWorkers * r);
                 if(victimId != myId)
-                    this->stealRunTask(ParEnv.pe[victimId],0);
+                    this->stealRunTask(ParEnv::pe[victimId],0);
             }
     }
 };
 
 class ParEnv{
     //static WorkerEnv pe[];
-    static std::vector<WorkerEnv*> pe;
-    static void initParallel(int nWorkers){
+    public: static std::vector<WorkerEnv> pe;
+    public: static void initParallel(int nWorkers){
         pe.resize(nWorkers);
         for (int id = 0; id < nWorkers; id++)
             pe[id] = new WorkerEnv(nWorkers, id);
@@ -116,7 +116,7 @@ class ParEnv{
 
 // 共通にする
 class Fib0{
-    static int fib0(int k){
+    public: static int fib0(int k){
         if(k <= 2) return 1;
         return fib0(k - 1) + fib0(k - 2);
     }
@@ -156,11 +156,11 @@ class Tfib : public Task0{
             int nWorkers = stoi(arg[0]);
             int k = stoi(arg[1]);
             thres = stoi(arg[2]);
-            ParEnv.initParallel(nWorkers);
+            ParEnv::initParallel(nWorkers);
             int r = 0;
             long long startTime; // nanotime
             try{
-                r = fib(ParEnv.ep[],k);
+                r = fib(ParEnv::pe[],k);
             }catch (TaskBuf tb){
                 ;
             }
@@ -170,7 +170,7 @@ class Tfib : public Task0{
             }
     
     static int fib(WorkerEnv w, int k) throw TaskBuf{
-        if (k <= thres) return Fib0.fib(k);
+        if (k <= thres) return Fib0::fib0(k);
         {
             //ここで、do-handleし、fib(k-1)実行中にfib(k-2)をspawn可能に
             // 
@@ -211,7 +211,7 @@ class TfibL : public Task0{
 
     public: TfibL(int k) {this->k = k;}
 
-    public: void run override(WorkerEnv thief){
+    public: void run(WorkerEnv* thief) override{
             //ここでdo-handleする。ただし、ここのハンドラはタスク生成しない
             //入れ子関数の場合
 
@@ -231,6 +231,59 @@ class TfibL : public Task0{
 
         // fib: 別クラスにせず、ここにstaticでかく
     
-    static int fib(WorkerEnv w, )
+    static int fib(WorkerEnv w, int k){
+        if (k <= thres) return Fib0::fib0(k);
+        {
+            int r0 = 0, r1 = 0;
+            std::vector<TaskBuf*> tb1(1);
+            {
+                //ラムダ式の処理
+
+                TaskBuf* bk1 = [](std::vector<TaskBuf*> tb){
+                    if (tb1.at(0) == nullptr){   //まだ面倒をみてない
+                        
+                        if (tb->getTask() == nullptr) //呼び出し元で面倒みてない
+                            //ここで面倒を見る
+                            (tb1[0] = tb)->setTask(new TfibL(k - 2));
+                    }
+                };
+
+                if (w.req != nullptr){
+                    TaskBuf* tb = w.acceptReq();
+                    bk1.accept(tb);
+                    if (tb->getTask() == nullptr){
+                        tb->setTask(new Task0());
+                    }
+                }
+                {{ r0 = fib(w, bk1, k - 1);}}
+            }
+            if (tb[0] == nullptr){
+                {{ r1 = fib(w, bk0, k - 2);}}
+            }else {
+                w.waitResult(tb1[0]);
+                {{ r1 = ((Tfib)(tb1[0]->getTask())).getResult(); }}
+            }
+
+        }
+    }
+
+    public: static void main(std::string arg[]){
+        int nWorkers = stoi(arg[0]);
+        int k = stoi(arg[1]);
+        thres = stoi(arg[2]);
+        ParEnv::initParallel(nWorkers);
+        int r = 0;
+        //long long StartTime = 
+        r = fib(ParEnv::pe[0], k);
+    }
 };
+
+/*
+class TfibSC : public Task0{
+    static class Frame_FIB : public Frame{
+
+    }
+
+};
+*/
 
