@@ -6,16 +6,28 @@
 #include <cstdio>
 #include <vector>
 #include <thread>
+#include <pthread.h>
 
-class WorkerEnv : Runnable{};
+int systhr_create(void * (*start_func)(void *), void *arg);
+void assign_cpu(int cpu);
 
+int systhr_create(void * (*start_func)(void *), void *arg){
+    int status = 0;
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    status = pthread_attr_setscope(&attr, PTHREAD_SCOPE_PROCESS);
+    if(status == 0) status = pthread_create(&tid, &attr, start_func, arg);
+    if(status != 0) status = pthread_create(&tid, 0,     start_func, arg);
+    return status;
+}
 
 //タスクをこれを拡張
 //これは何もしないタスクであり、noneで拒否の代わりに使える
 class Task0{
     protected: bool hasResult0 = false;
-    public: bool hasResult(){ return hasResult0; }
-    public: virtual void run(WorkerEnv* w) { ; /* 何もしない */}
+    public: bool hasResult() {return hasResult0;}
+
 };
 
 // treq の際に new して victim（候補）の req に渡す
